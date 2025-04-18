@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pendaftaran Sidik Jari Guru</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #f0f2f5;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    form {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    input, select, button {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    select {
+      background-color: white;
+    }
+    h2 {
+      text-align: center;
+      margin-top: 0;
+      color: #333;
+    }
+    .success {
+      color: green;
+      text-align: center;
+      white-space: pre-line;
+      padding: 10px;
+      background: #d4edda;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    .error {
+      color: red;
+      text-align: center;
+      padding: 10px;
+      background: #f8d7da;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    #serial-monitor {
+      background: #1e1e1e;
+      color: #00ff00;
+      padding: 15px;
+      border-radius: 12px;
+      font-family: monospace;
+      height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    #serial-monitor p {
+      margin: 5px 0;
+      line-height: 1.4;
+    }
+    .clear-button {
+      background: #ff4444;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    .clear-button:hover {
+      background: #cc0000;
+    }
+    button[type="submit"] {
+      background: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button[type="submit"]:hover {
+      background: #0056b3;
+    }
+    @media (max-width: 768px) {
+      .container {
+        grid-template-columns: 1fr;
+      }
+    }
+    #connection-status {
+      text-align: center;
+      padding: 10px;
+      margin-bottom: 20px;
+      border-radius: 5px;
+    }
+    .connected {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .disconnected {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .connecting {
+      background-color: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeeba;
+    }
+  </style>
+</head>
+<body>
+  <div id="connection-status" class="connecting">
+    Mencoba terhubung ke ESP32...
+  </div>
+  
+  <div class="container">
+    <form id="form-fingerprint">
+      <h2>Pendaftaran Sidik Jari</h2>
+      <input type="text" id="nama" placeholder="Nama Lengkap" required />
+      <select id="department" required>
+        <option value="">Pilih Department</option>
+      </select>
+      <input type="text" id="jabatan" placeholder="Jabatan (contoh: Guru)" required />
+      <input type="text" id="nip" placeholder="NIP" required />
+      <select id="shift" required>
+        <option value="">Pilih Shift</option>
+      </select>
+      <input type="number" id="fingerprint_id" placeholder="ID Fingerprint (mis. 1, 2, 3...)" required />
+      <button type="submit">Daftar</button>
+      <div id="status" class="success"></div>
+    </form>
+
+    <div>
+      <h2>Serial Monitor</h2>
+      <div id="serial-monitor"></div>
+      <button class="clear-button" onclick="clearSerialMonitor()">Clear Monitor</button>
+    </div>
+  </div>
+
+  <script>
+    const { createClient } = supabase;
+    const supabaseClient = createClient(
+      'https://zntmnajpxgusovqroneh.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpudG1uYWpweGd1c292cXJvbmVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ4NzM4NjYsImV4cCI6MjA2MDQ0OTg2Nn0.2cOGbm_aOp9wxkwhRc56yv0fRtVakUmhMMC8_-nhw1A'
+    );
+
+    const serialMonitor = document.getElementById('serial-monitor');
+    const connectionStatus = document.getElementById('connection-status');
+    const departmentSelect = document.getElementById('department');
+    const shiftSelect = document.getElementById('shift');
+    let ws;
+    let espIP = localStorage.getItem('espIP') || null;
+    let wsPort = localStorage.getItem('wsPort') || 81;
+
+    // Load departments and shifts
+    async function loadDepartmentsAndShifts() {
+      try {
+        const { data: departments } = await supabaseClient
+          .from('department')
+          .select('id, nama_department');
+        
+        departments.forEach(dept => {
+          const option = document.createElement('option');
+          option.value = dept.id;
+          option.textContent = dept.nama_department;
+          departmentSelect.appendChild(option);
+        });
+
+        const { data: shifts } = await supabaseClient
+          .from('shift')
+          .select('id, nama_shift, jam_masuk, jam_keluar');
+        
+        shifts.forEach(shift => {
+          const option = document.createElement('option');
+          option.value = shift.id;
+          option.textContent = `${shift.nama_shift} (${shift.jam_masuk}-${shift.jam_keluar})`;
+          shiftSelect.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Error loading data:', error);
+      }
+    }
+
+    // Add manual IP input form
+    const ipForm = document.createElement('form');
+    ipForm.innerHTML = `
+      <div style="margin-bottom: 20px; text-align: center;">
+        <input type="text" id="manual-ip" placeholder="ESP32 IP Address" style="width: 200px; margin-right: 10px;" 
+               value="${espIP || ''}" />
+        <button type="submit">Connect</button>
+      </div>
+    `;
+    document.body.insertBefore(ipForm, document.querySelector('.container'));
+
+    ipForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const manualIP = document.getElementById('manual-ip').value;
+      if (manualIP) {
+        try {
+          connectionStatus.className = 'connecting';
+          connectionStatus.textContent = 'Mencoba terhubung...';
+          
+          const response = await fetch(`http://${manualIP}/ip`, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json'
+            },
+            mode: 'cors',
+            cache: 'no-cache'
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.status === 'success') {
+            espIP = data.ip;
+            wsPort = data.wsPort || 81;
+            localStorage.setItem('espIP', espIP);
+            localStorage.setItem('wsPort', wsPort);
+            connectionStatus.className = 'connected';
+            connectionStatus.textContent = `Terhubung ke ESP32 (${espIP})`;
+            connectWebSocket();
+            return;
+          }
+          throw new Error('Invalid response from ESP32');
+        } catch (error) {
+          console.error('Error connecting to manual IP:', error);
+          appendToSerialMonitor('Error connecting to manual IP: ' + error.message);
+          connectionStatus.className = 'disconnected';
+          connectionStatus.textContent = 'Gagal terhubung: ' + error.message;
+        }
+      } else {
+        connectionStatus.className = 'disconnected';
+        connectionStatus.textContent = 'Silakan masukkan IP Address ESP32';
+      }
+    });
+
+    async function findESP32() {
+      if (espIP) {
+        try {
+          connectionStatus.className = 'connecting';
+          connectionStatus.textContent = 'Mencoba terhubung ke IP tersimpan...';
+          
+          const response = await fetch(`http://${espIP}/ip`, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/json'
+            },
+            mode: 'cors',
+            cache: 'no-cache'
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.status === 'success') {
+            connectionStatus.className = 'connected';
+            connectionStatus.textContent = `Terhubung ke ESP32 (${espIP})`;
+            connectWebSocket();
+            return;
+          }
+        } catch (error) {
+          console.log('Stored IP not responding:', error);
+          localStorage.removeItem('espIP');
+          localStorage.removeItem('wsPort');
+          espIP = null;
+          connectionStatus.className = 'disconnected';
+          connectionStatus.textContent = 'IP tersimpan tidak merespons. Silakan masukkan IP baru.';
+        }
+      } else {
+        connectionStatus.className = 'disconnected';
+        connectionStatus.textContent = 'Silakan masukkan IP Address ESP32';
+      }
+    }
+
+    function connectWebSocket() {
+      if (!espIP) return;
+      
+      ws = new WebSocket(`ws://${espIP}:${wsPort}`);
+      
+      ws.onopen = () => {
+        appendToSerialMonitor('WebSocket Connected');
+        connectionStatus.className = 'connected';
+        connectionStatus.textContent = `Terhubung ke ESP32 (${espIP})`;
+      };
+      
+      ws.onclose = () => {
+        appendToSerialMonitor('WebSocket Disconnected');
+        connectionStatus.className = 'disconnected';
+        connectionStatus.textContent = 'Koneksi terputus';
+        setTimeout(findESP32, 5000);
+      };
+      
+      ws.onmessage = (event) => {
+        appendToSerialMonitor(event.data);
+      };
+      
+      ws.onerror = (error) => {
+        appendToSerialMonitor('WebSocket Error: ' + error.message);
+        connectionStatus.className = 'disconnected';
+        connectionStatus.textContent = 'Terjadi kesalahan koneksi';
+      };
+    }
+
+    function appendToSerialMonitor(message) {
+      const p = document.createElement('p');
+      p.textContent = message;
+      serialMonitor.appendChild(p);
+      serialMonitor.scrollTop = serialMonitor.scrollHeight;
+    }
+
+    function clearSerialMonitor() {
+      serialMonitor.innerHTML = '';
+    }
+
+    async function kirimKeESP32(fingerprint_id) {
+      if (!espIP) {
+        throw new Error('ESP32 tidak terhubung');
+      }
+
+      try {
+        const response = await fetch(`http://${espIP}/daftar`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain',
+            'Origin': window.location.origin
+          },
+          body: `DAFTAR:${fingerprint_id}`,
+          mode: 'cors'
+        });
+
+        if (!response.ok) {
+          throw new Error('Gagal mengirim data ke ESP32');
+        }
+
+        const data = await response.json();
+        return data.message || "Data berhasil dikirim ke ESP32";
+        
+      } catch (error) {
+        console.error("Gagal mengirim ke ESP32:", error);
+        throw new Error('Gagal terhubung ke ESP32. Pastikan ESP32 menyala dan IP Address benar.');
+      }
+    }
+
+    document.getElementById('form-fingerprint').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nama = document.getElementById('nama').value;
+      const department_id = document.getElementById('department').value;
+      const jabatan = document.getElementById('jabatan').value;
+      const nip = document.getElementById('nip').value;
+      const shift_id = document.getElementById('shift').value;
+      const fingerprint_id = parseInt(document.getElementById('fingerprint_id').value);
+
+      const status = document.getElementById('status');
+      status.textContent = '';
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('staff')
+          .insert([{ 
+            nama, 
+            department_id, 
+            jabatan, 
+            nip, 
+            shift_id,
+            fingerprint_id,
+            status: 'aktif'
+          }]);
+
+        if (error) {
+          status.className = 'error';
+          status.textContent = '❌ Gagal mendaftar: ' + error.message;
+          return;
+        }
+
+        status.className = 'success';
+        status.textContent = `✅ Pendaftaran berhasil untuk ${nama}.\n\n📡 Mengirim ID ke ESP32...`;
+        
+        await kirimKeESP32(fingerprint_id);
+        status.textContent += `\n📲 Silakan letakkan jari pada sensor untuk ID ${fingerprint_id}.`;
+        e.target.reset();
+        
+      } catch (error) {
+        status.className = 'error';
+        status.textContent = '❌ Gagal mengirim ke ESP32: ' + error.message;
+      }
+    });
+
+    // Load initial data
+    loadDepartmentsAndShifts();
+    findESP32();
+  </script>
+</body>
+</html>
