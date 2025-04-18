@@ -118,6 +118,32 @@
 <body>
   <h1>Data Kehadiran Staf</h1>
 
+  <div class="summary">
+    <h2>Ringkasan Kehadiran</h2>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="count" id="count-hadir">0</div>
+        <div class="label">Hadir</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-terlambat">0</div>
+        <div class="label">Terlambat</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-izin">0</div>
+        <div class="label">Izin</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-sakit">0</div>
+        <div class="label">Sakit</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-alpha">0</div>
+        <div class="label">Alpha</div>
+      </div>
+    </div>
+  </div>
+  
   <div class="filters">
     <select id="department-filter">
       <option value="">Semua Department</option>
@@ -158,31 +184,7 @@
     </table>
   </div>
 
-  <div class="summary">
-    <h2>Ringkasan Kehadiran</h2>
-    <div class="summary-grid">
-      <div class="summary-item">
-        <div class="count" id="count-hadir">0</div>
-        <div class="label">Hadir</div>
-      </div>
-      <div class="summary-item">
-        <div class="count" id="count-terlambat">0</div>
-        <div class="label">Terlambat</div>
-      </div>
-      <div class="summary-item">
-        <div class="count" id="count-izin">0</div>
-        <div class="label">Izin</div>
-      </div>
-      <div class="summary-item">
-        <div class="count" id="count-sakit">0</div>
-        <div class="label">Sakit</div>
-      </div>
-      <div class="summary-item">
-        <div class="count" id="count-alpha">0</div>
-        <div class="label">Alpha</div>
-      </div>
-    </div>
-  </div>
+
 
   <script>
     const supabaseUrl = 'https://zntmnajpxgusovqroneh.supabase.co';
@@ -195,9 +197,16 @@
     const shiftFilter = document.getElementById('shift-filter');
     const dateFilter = document.getElementById('date-filter');
     const statusFilter = document.getElementById('status-filter');
+    let currentFilters = {
+      department: '',
+      shift: '',
+      date: '',
+      status: ''
+    };
 
     // Set default date to today
     dateFilter.valueAsDate = new Date();
+    currentFilters.date = dateFilter.value;
 
     // Load departments and shifts
     async function loadFilters() {
@@ -229,26 +238,21 @@
     }
 
     async function loadAbsensi() {
-      const department = departmentFilter.value;
-      const shift = shiftFilter.value;
-      const date = dateFilter.value;
-      const status = statusFilter.value;
-
       let query = supabaseClient
         .from('daily_attendance_report')
         .select('*');
 
-      if (department) {
-        query = query.eq('department_id', department);
+      if (currentFilters.department) {
+        query = query.eq('department_id', currentFilters.department);
       }
-      if (shift) {
-        query = query.eq('shift_id', shift);
+      if (currentFilters.shift) {
+        query = query.eq('shift_id', currentFilters.shift);
       }
-      if (date) {
-        query = query.eq('tanggal', date);
+      if (currentFilters.date) {
+        query = query.eq('tanggal', currentFilters.date);
       }
-      if (status) {
-        query = query.eq('status_kehadiran', status);
+      if (currentFilters.status) {
+        query = query.eq('status_kehadiran', currentFilters.status);
       }
 
       try {
@@ -259,53 +263,88 @@
           return;
         }
 
-        const tbody = document.getElementById('absensi-table');
-        tbody.innerHTML = '';
-
-        // Reset counters
-        const counters = {
-          hadir: 0,
-          terlambat: 0,
-          izin: 0,
-          sakit: 0,
-          alpha: 0
-        };
-
-        absensi.forEach((row) => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `
-            <td>${new Date(row.tanggal).toLocaleDateString('id-ID')}</td>
-            <td>${row.nama || '-'}</td>
-            <td>${row.nip || '-'}</td>
-            <td>${row.jabatan || '-'}</td>
-            <td>${row.nama_department || '-'}</td>
-            <td>${row.nama_shift || '-'}</td>
-            <td>${row.waktu_masuk ? new Date(row.waktu_masuk).toLocaleTimeString('id-ID') : '-'}</td>
-            <td>${row.waktu_keluar ? new Date(row.waktu_keluar).toLocaleTimeString('id-ID') : '-'}</td>
-            <td class="status-${row.status_kehadiran}">${row.status_kehadiran}</td>
-            <td>${row.keterangan || '-'}</td>
-          `;
-          tbody.appendChild(tr);
-
-          // Update counters
-          counters[row.status_kehadiran]++;
-        });
-
-        // Update summary
-        Object.keys(counters).forEach(status => {
-          document.getElementById(`count-${status}`).textContent = counters[status];
-        });
-
+        updateTable(absensi);
       } catch (error) {
         console.error('Error:', error);
       }
     }
 
+    function updateTable(absensi) {
+      const tbody = document.getElementById('absensi-table');
+      tbody.innerHTML = '';
+
+      // Reset counters
+      const counters = {
+        hadir: 0,
+        terlambat: 0,
+        izin: 0,
+        sakit: 0,
+        alpha: 0
+      };
+
+      absensi.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${new Date(row.tanggal).toLocaleDateString('id-ID')}</td>
+          <td>${row.nama || '-'}</td>
+          <td>${row.nip || '-'}</td>
+          <td>${row.jabatan || '-'}</td>
+          <td>${row.nama_department || '-'}</td>
+          <td>${row.nama_shift || '-'}</td>
+          <td>${row.waktu_masuk ? new Date(row.waktu_masuk).toLocaleTimeString('id-ID') : '-'}</td>
+          <td>${row.waktu_keluar ? new Date(row.waktu_keluar).toLocaleTimeString('id-ID') : '-'}</td>
+          <td class="status-${row.status_kehadiran}">${row.status_kehadiran}</td>
+          <td>${row.keterangan || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+
+        // Update counters
+        counters[row.status_kehadiran]++;
+      });
+
+      // Update summary
+      Object.keys(counters).forEach(status => {
+        document.getElementById(`count-${status}`).textContent = counters[status];
+      });
+    }
+
+    // Setup realtime subscription
+    const subscription = supabaseClient
+      .channel('custom-all-channel')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'absensi'
+        },
+        (payload) => {
+          console.log('Change received!', payload);
+          loadAbsensi(); // Reload data when changes occur
+        }
+      )
+      .subscribe();
+
     // Add event listeners to filters
-    departmentFilter.addEventListener('change', loadAbsensi);
-    shiftFilter.addEventListener('change', loadAbsensi);
-    dateFilter.addEventListener('change', loadAbsensi);
-    statusFilter.addEventListener('change', loadAbsensi);
+    departmentFilter.addEventListener('change', (e) => {
+      currentFilters.department = e.target.value;
+      loadAbsensi();
+    });
+
+    shiftFilter.addEventListener('change', (e) => {
+      currentFilters.shift = e.target.value;
+      loadAbsensi();
+    });
+
+    dateFilter.addEventListener('change', (e) => {
+      currentFilters.date = e.target.value;
+      loadAbsensi();
+    });
+
+    statusFilter.addEventListener('change', (e) => {
+      currentFilters.status = e.target.value;
+      loadAbsensi();
+    });
 
     // Initial load
     loadFilters().then(() => loadAbsensi());
