@@ -20,7 +20,7 @@ const String supabase_api_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi
 
 // Konfigurasi NTP
 const char* ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = 25200; // GMT+7 dalam detik
+const long gmtOffset_sec = 32400; // GMT+9 (Timika, Papua Tengah = UTC+9)
 const int daylightOffset_sec = 0;
 
 // Inisialisasi serial dan fingerprint
@@ -44,6 +44,12 @@ int scanSidikJari();
 bool daftarSidikJari(int id);
 uint8_t getFingerprintEnroll(int id);
 void sendSerialUpdate(String message);
+bool hapusSidikJari(int id);
+bool resetSemuaSidikJari();
+void handleDeleteFingerprint();
+void handleResetFingerprints();
+bool hapusDataStaff(int fingerprint_id);
+bool hapusSemuaDataStaff();
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
   switch(type) {
@@ -99,6 +105,35 @@ void handlePostRequest() {
     server.send(200, "application/json", "{\"status\":\"success\",\"message\":\"Pendaftaran berhasil untuk ID: " + String(idPendaftaran) + "\"}");
   } else {
     server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Bad Request\"}");
+  }
+}
+
+void handleDeleteFingerprint() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Content-Type", "application/json");
+  
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    int id = body.substring(body.indexOf(":") + 1).toInt();
+    
+    if (hapusSidikJari(id)) {
+      server.send(200, "application/json", "{\"status\":\"success\",\"message\":\"Sidik jari berhasil dihapus\"}");
+    } else {
+      server.send(500, "application/json", "{\"status\":\"error\",\"message\":\"Gagal menghapus sidik jari\"}");
+    }
+  } else {
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Bad Request\"}");
+  }
+}
+
+void handleResetFingerprints() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Content-Type", "application/json");
+  
+  if (resetSemuaSidikJari()) {
+    server.send(200, "application/json", "{\"status\":\"success\",\"message\":\"Semua sidik jari berhasil dihapus\"}");
+  } else {
+    server.send(500, "application/json", "{\"status\":\"error\",\"message\":\"Gagal menghapus semua sidik jari\"}");
   }
 }
 
@@ -160,6 +195,25 @@ void setup() {
   
   server.on("/daftar", HTTP_POST, handlePostRequest);
   
+  // Tambahkan route untuk hapus dan reset sidik jari
+  server.on("/hapus", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    server.send(200);
+  });
+  
+  server.on("/hapus", HTTP_POST, handleDeleteFingerprint);
+  
+  server.on("/reset", HTTP_OPTIONS, []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    server.send(200);
+  });
+  
+  server.on("/reset", HTTP_POST, handleResetFingerprints);
+  
   server.onNotFound([]() {
     server.send(404, "text/plain", "Not found");
   });
@@ -217,7 +271,6 @@ void kirimAbsensiKeWeb(int fingerprint_id) {
     return;
   }
 
-  // Dapatkan waktu saat ini
   struct tm timeinfo;
   if(!getLocalTime(&timeinfo)) {
     Serial.println("Gagal mendapatkan waktu");
@@ -229,30 +282,30 @@ void kirimAbsensiKeWeb(int fingerprint_id) {
 
   HTTPClient http;
   
-  // Pertama, dapatkan staff_id berdasarkan fingerprint_id
-  String staffEndpoint = supabase_url + "/rest/v1/staff?fingerprint_id=eq." + String(fingerprint_id) + "&select=id";
+  // Dapatkan staff_id dan nama berdasarkan fingerprint_id
+  String staffEndpoint = supabase_url + "/rest/v1/staff?fingerprint_id=eq." + String(fingerprint_id) + "&select=id,nama";
   http.begin(staffEndpoint);
   http.addHeader("apikey", supabase_api_key);
   http.addHeader("Authorization", "Bearer " + supabase_api_key);
   
   int httpCode = http.GET();
   String staff_id = "";
+  String nama = "";
   
   if (httpCode > 0) {
     String payload = http.getString();
-    // Parse response untuk mendapatkan staff_id
-    if (payload.length() > 2) { // minimal response valid: [{}]
+    if (payload.length() > 2) {
       DynamicJsonDocument doc(200);
       deserializeJson(doc, payload);
       if (doc[0]["id"]) {
         staff_id = doc[0]["id"].as<String>();
+        nama = doc[0]["nama"].as<String>();
       }
     }
   }
   
   http.end();
 
-  // Jika staff_id ditemukan, kirim data absensi
   if (staff_id.length() > 0) {
     String endpoint = supabase_url + "/rest/v1/absensi";
     http.begin(endpoint);
@@ -267,17 +320,8 @@ void kirimAbsensiKeWeb(int fingerprint_id) {
     httpCode = http.POST(jsonData);
     
     if (httpCode > 0) {
-      String payload = http.getString();
-      Serial.println("Respon Supabase:");
-      Serial.println(payload);
-      sendSerialUpdate("Absensi berhasil dicatat untuk ID: " + String(fingerprint_id));
-    } else {
-      Serial.println("HTTP Request gagal, kode: " + String(httpCode));
-      sendSerialUpdate("Gagal mencatat absensi untuk ID: " + String(fingerprint_id));
+      Serial.println(nama + " - " + String(waktu));
     }
-  } else {
-    Serial.println("Staff dengan fingerprint ID " + String(fingerprint_id) + " tidak ditemukan");
-    sendSerialUpdate("Staff dengan fingerprint ID " + String(fingerprint_id) + " tidak ditemukan");
   }
 
   http.end();
@@ -332,6 +376,86 @@ uint8_t getFingerprintEnroll(int id) {
     return true;
   } else {
     sendSerialUpdate("Gagal menyimpan model ke sensor.");
+    return false;
+  }
+}
+
+bool hapusDataStaff(int fingerprint_id) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi tidak terhubung. Gagal menghapus data.");
+    return false;
+  }
+
+  HTTPClient http;
+  String endpoint = supabase_url + "/rest/v1/staff?fingerprint_id=eq." + String(fingerprint_id);
+  
+  http.begin(endpoint);
+  http.addHeader("apikey", supabase_api_key);
+  http.addHeader("Authorization", "Bearer " + supabase_api_key);
+  
+  int httpCode = http.sendRequest("DELETE");
+  
+  if (httpCode > 0) {
+    // Hapus juga data absensi
+    endpoint = supabase_url + "/rest/v1/absensi?fingerprint_id=eq." + String(fingerprint_id);
+    http.begin(endpoint);
+    http.addHeader("apikey", supabase_api_key);
+    http.addHeader("Authorization", "Bearer " + supabase_api_key);
+    http.sendRequest("DELETE");
+    return true;
+  }
+  
+  http.end();
+  return false;
+}
+
+bool hapusSemuaDataStaff() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi tidak terhubung. Gagal menghapus data.");
+    return false;
+  }
+
+  HTTPClient http;
+  
+  // Hapus semua data staff
+  String endpoint = supabase_url + "/rest/v1/staff";
+  http.begin(endpoint);
+  http.addHeader("apikey", supabase_api_key);
+  http.addHeader("Authorization", "Bearer " + supabase_api_key);
+  http.sendRequest("DELETE");
+  
+  // Hapus semua data absensi
+  endpoint = supabase_url + "/rest/v1/absensi";
+  http.begin(endpoint);
+  http.addHeader("apikey", supabase_api_key);
+  http.addHeader("Authorization", "Bearer " + supabase_api_key);
+  http.sendRequest("DELETE");
+  
+  http.end();
+  return true;
+}
+
+bool hapusSidikJari(int id) {
+  uint8_t p = -1;
+  p = finger.deleteModel(id);
+  if (p == FINGERPRINT_OK) {
+    hapusDataStaff(id);
+    Serial.println("Sidik jari ID #" + String(id) + " berhasil dihapus!");
+    return true;
+  } else {
+    Serial.println("Gagal menghapus sidik jari ID #" + String(id));
+    return false;
+  }
+}
+
+bool resetSemuaSidikJari() {
+  uint8_t p = finger.emptyDatabase();
+  if (p == FINGERPRINT_OK) {
+    hapusSemuaDataStaff();
+    Serial.println("Semua sidik jari berhasil dihapus!");
+    return true;
+  } else {
+    Serial.println("Gagal menghapus semua sidik jari!");
     return false;
   }
 }
