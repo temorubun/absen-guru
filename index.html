@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitoring Kehadiran Staf</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 30px;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    select, input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .table-container {
+      overflow-x: auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0;
+      background: white;
+    }
+    th, td {
+      padding: 12px;
+      border: 1px solid #ddd;
+      text-align: left;
+    }
+    th {
+      background-color: #007BFF;
+      color: white;
+      position: sticky;
+      top: 0;
+    }
+    tr:nth-child(even) {
+      background-color: #f8f9fa;
+    }
+    .status-hadir {
+      color: #28a745;
+      font-weight: bold;
+    }
+    .status-terlambat {
+      color: #ffc107;
+      font-weight: bold;
+    }
+    .status-izin {
+      color: #17a2b8;
+      font-weight: bold;
+    }
+    .status-sakit {
+      color: #6c757d;
+      font-weight: bold;
+    }
+    .status-alpha {
+      color: #dc3545;
+      font-weight: bold;
+    }
+    .summary {
+      margin-top: 20px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .summary h2 {
+      color: #333;
+      margin-top: 0;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+    .summary-item {
+      text-align: center;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+    }
+    .summary-item .count {
+      font-size: 24px;
+      font-weight: bold;
+      color: #007bff;
+    }
+    .summary-item .label {
+      color: #6c757d;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Data Kehadiran Staf</h1>
+
+  <div class="filters">
+    <select id="department-filter">
+      <option value="">Semua Department</option>
+    </select>
+    <select id="shift-filter">
+      <option value="">Semua Shift</option>
+    </select>
+    <input type="date" id="date-filter" />
+    <select id="status-filter">
+      <option value="">Semua Status</option>
+      <option value="hadir">Hadir</option>
+      <option value="terlambat">Terlambat</option>
+      <option value="izin">Izin</option>
+      <option value="sakit">Sakit</option>
+      <option value="alpha">Alpha</option>
+    </select>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Tanggal</th>
+          <th>Nama</th>
+          <th>NIP</th>
+          <th>Jabatan</th>
+          <th>Department</th>
+          <th>Shift</th>
+          <th>Waktu Masuk</th>
+          <th>Waktu Keluar</th>
+          <th>Status</th>
+          <th>Keterangan</th>
+        </tr>
+      </thead>
+      <tbody id="absensi-table">
+        <!-- Data akan dimuat di sini -->
+      </tbody>
+    </table>
+  </div>
+
+  <div class="summary">
+    <h2>Ringkasan Kehadiran</h2>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="count" id="count-hadir">0</div>
+        <div class="label">Hadir</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-terlambat">0</div>
+        <div class="label">Terlambat</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-izin">0</div>
+        <div class="label">Izin</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-sakit">0</div>
+        <div class="label">Sakit</div>
+      </div>
+      <div class="summary-item">
+        <div class="count" id="count-alpha">0</div>
+        <div class="label">Alpha</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const supabaseUrl = 'https://zntmnajpxgusovqroneh.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpudG1uYWpweGd1c292cXJvbmVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ4NzM4NjYsImV4cCI6MjA2MDQ0OTg2Nn0.2cOGbm_aOp9wxkwhRc56yv0fRtVakUmhMMC8_-nhw1A';
+    const { createClient } = supabase;
+    const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+    // Initialize filters
+    const departmentFilter = document.getElementById('department-filter');
+    const shiftFilter = document.getElementById('shift-filter');
+    const dateFilter = document.getElementById('date-filter');
+    const statusFilter = document.getElementById('status-filter');
+
+    // Set default date to today
+    dateFilter.valueAsDate = new Date();
+
+    // Load departments and shifts
+    async function loadFilters() {
+      try {
+        const { data: departments } = await supabaseClient
+          .from('department')
+          .select('id, nama_department');
+        
+        departments.forEach(dept => {
+          const option = document.createElement('option');
+          option.value = dept.id;
+          option.textContent = dept.nama_department;
+          departmentFilter.appendChild(option);
+        });
+
+        const { data: shifts } = await supabaseClient
+          .from('shift')
+          .select('id, nama_shift');
+        
+        shifts.forEach(shift => {
+          const option = document.createElement('option');
+          option.value = shift.id;
+          option.textContent = shift.nama_shift;
+          shiftFilter.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Error loading filters:', error);
+      }
+    }
+
+    async function loadAbsensi() {
+      const department = departmentFilter.value;
+      const shift = shiftFilter.value;
+      const date = dateFilter.value;
+      const status = statusFilter.value;
+
+      let query = supabaseClient
+        .from('daily_attendance_report')
+        .select('*');
+
+      if (department) {
+        query = query.eq('department_id', department);
+      }
+      if (shift) {
+        query = query.eq('shift_id', shift);
+      }
+      if (date) {
+        query = query.eq('tanggal', date);
+      }
+      if (status) {
+        query = query.eq('status_kehadiran', status);
+      }
+
+      try {
+        const { data: absensi, error } = await query;
+
+        if (error) {
+          console.error('Error loading data:', error);
+          return;
+        }
+
+        const tbody = document.getElementById('absensi-table');
+        tbody.innerHTML = '';
+
+        // Reset counters
+        const counters = {
+          hadir: 0,
+          terlambat: 0,
+          izin: 0,
+          sakit: 0,
+          alpha: 0
+        };
+
+        absensi.forEach((row) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${new Date(row.tanggal).toLocaleDateString('id-ID')}</td>
+            <td>${row.nama || '-'}</td>
+            <td>${row.nip || '-'}</td>
+            <td>${row.jabatan || '-'}</td>
+            <td>${row.nama_department || '-'}</td>
+            <td>${row.nama_shift || '-'}</td>
+            <td>${row.waktu_masuk ? new Date(row.waktu_masuk).toLocaleTimeString('id-ID') : '-'}</td>
+            <td>${row.waktu_keluar ? new Date(row.waktu_keluar).toLocaleTimeString('id-ID') : '-'}</td>
+            <td class="status-${row.status_kehadiran}">${row.status_kehadiran}</td>
+            <td>${row.keterangan || '-'}</td>
+          `;
+          tbody.appendChild(tr);
+
+          // Update counters
+          counters[row.status_kehadiran]++;
+        });
+
+        // Update summary
+        Object.keys(counters).forEach(status => {
+          document.getElementById(`count-${status}`).textContent = counters[status];
+        });
+
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    }
+
+    // Add event listeners to filters
+    departmentFilter.addEventListener('change', loadAbsensi);
+    shiftFilter.addEventListener('change', loadAbsensi);
+    dateFilter.addEventListener('change', loadAbsensi);
+    statusFilter.addEventListener('change', loadAbsensi);
+
+    // Initial load
+    loadFilters().then(() => loadAbsensi());
+  </script>
+</body>
+</html>
